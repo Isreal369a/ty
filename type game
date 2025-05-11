@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Volume2, VolumeX } from 'lucide-react';
 
 const WORDS = ['react', 'typing', 'game', 'enemy', 'shoot', 'keyboard', 'level', 'score', 'speed'];
 
@@ -29,12 +30,46 @@ export default function TypingGame() {
   const [countdown, setCountdown] = useState(3);
   const [paused, setPaused] = useState(false);
   const [isDimmed, setIsDimmed] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [correctChars, setCorrectChars] = useState(0);
+  const [totalTypedChars, setTotalTypedChars] = useState(0);
+
   const gameRef = useRef();
   const idCounter = useRef(0);
   const audioRef = useRef(null);
   const destroySoundRef = useRef(null);
   const pauseSoundRef = useRef(null);
   const resumeSoundRef = useRef(null);
+
+  useEffect(() => {
+    const handleKeydown = (e) => {
+      if (e.key.toLowerCase() === 'm') {
+        setMuted((prev) => {
+          const newMuted = !prev;
+          setToastMessage(newMuted ? 'Muted' : 'Unmuted');
+          setTimeout(() => setToastMessage(''), 1000);
+          return newMuted;
+        });
+      }
+      if (e.key.toLowerCase() === 'p') {
+        setPaused((prev) => {
+          const newPaused = !prev;
+          setIsDimmed(newPaused);
+          const soundRef = newPaused ? pauseSoundRef : resumeSoundRef;
+          if (soundRef.current && !muted) {
+            soundRef.current.currentTime = 0;
+            soundRef.current.play().catch(() => {});
+          }
+          setToastMessage(newPaused ? 'Paused' : 'Resumed');
+          setTimeout(() => setToastMessage(''), 1000);
+          return newPaused;
+        });
+      }
+    };
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [muted]);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -80,7 +115,7 @@ export default function TypingGame() {
         setEnemies((prev) => prev.filter((_, i) => i !== matchedIndex));
         setInput('');
         setTargetId(null);
-        if (destroySoundRef.current) {
+        if (destroySoundRef.current && !muted) {
           destroySoundRef.current.currentTime = 0;
           destroySoundRef.current.play().catch(() => {});
         }
@@ -88,7 +123,7 @@ export default function TypingGame() {
     } else {
       setTargetId(null);
     }
-  }, [input, enemies]);
+  }, [input, enemies, muted]);
 
   useEffect(() => {
     const newLevel = Math.floor(score / 5) + 1;
@@ -104,12 +139,26 @@ export default function TypingGame() {
     if (audioRef.current) {
       audioRef.current.volume = 0.5;
       audioRef.current.loop = true;
-      audioRef.current.play().catch(() => {});
+      if (!muted) {
+        audioRef.current.play().catch(() => {});
+      } else {
+        audioRef.current.pause();
+      }
     }
-  }, []);
+  }, [muted]);
 
   const handleInput = (e) => {
-    if (!gameOver && !paused) setInput(e.target.value);
+    if (!gameOver && !paused) {
+      const newInput = e.target.value;
+      setInput(newInput);
+      setTotalTypedChars((t) => t + 1);
+
+      const matchedEnemy = enemies.find((enemy) => enemy.word.startsWith(newInput));
+      if (matchedEnemy) {
+        const correctCount = [...newInput].filter((char, i) => matchedEnemy.word[i] === char).length;
+        setCorrectChars((prev) => prev + correctCount);
+      }
+    }
   };
 
   const restartGame = () => {
@@ -124,6 +173,8 @@ export default function TypingGame() {
     setCountdown(3);
     setPaused(false);
     setIsDimmed(false);
+    setCorrectChars(0);
+    setTotalTypedChars(0);
   };
 
   const togglePause = () => {
@@ -131,13 +182,20 @@ export default function TypingGame() {
       const newPaused = !prev;
       setIsDimmed(newPaused);
       const soundRef = newPaused ? pauseSoundRef : resumeSoundRef;
-      if (soundRef.current) {
+      if (soundRef.current && !muted) {
         soundRef.current.currentTime = 0;
         soundRef.current.play().catch(() => {});
       }
       return newPaused;
     });
   };
+
+  const toggleMute = () => {
+    setMuted((prev) => !prev);
+  };
+
+  const accuracy = totalTypedChars > 0 ? ((correctChars / totalTypedChars) * 100).toFixed(1) : '100.0';
+  const accuracyColor = accuracy >= 90 ? 'text-green-400' : accuracy >= 70 ? 'text-yellow-300' : 'text-red-400';
 
   return (
     <div className={`min-h-screen text-white p-4 relative overflow-hidden transition-all duration-300 ${isDimmed ? 'bg-gray-800' : 'bg-gradient-to-b from-black via-gray-900 to-black'}`}>
@@ -146,8 +204,15 @@ export default function TypingGame() {
       <audio ref={pauseSoundRef} src="https://cdn.pixabay.com/download/audio/2022/10/25/audio_4e672de56e.mp3?filename=pause-102193.mp3" />
       <audio ref={resumeSoundRef} src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_5e1d168f2e.mp3?filename=positive-notification-110913.mp3" />
 
+      {toastMessage && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 text-white px-4 py-2 rounded text-sm z-50 transition-opacity duration-300">
+          {toastMessage}
+        </div>
+      )}
+
       <h1 className="text-4xl font-extrabold mb-4 text-center">React Typing Game</h1>
-      <p className="mb-2 text-center text-xl">Score: {score} | Level: {level} | High Score: {highScore}</p>
+      <p className="mb-1 text-center text-xl">Score: {score} | Level: {level} | High Score: {highScore}</p>
+      <p className={`mb-2 text-center text-md font-mono ${accuracyColor}`}>Accuracy: {accuracy}%</p>
 
       {countdown > 0 ? (
         <div className="text-center text-6xl font-bold animate-bounce">{countdown}</div>
@@ -163,12 +228,19 @@ export default function TypingGame() {
         </div>
       )}
 
-      <div className="text-center mb-4">
+      <div className="text-center mb-4 space-x-2">
         <button
           onClick={togglePause}
-          className="bg-yellow-400 text-black px-4 py-1 rounded mr-2 hover:bg-yellow-500"
+          className="bg-yellow-400 text-black px-4 py-1 rounded hover:bg-yellow-500"
         >
           {paused ? 'Resume' : 'Pause'}
+        </button>
+        <button
+          onClick={toggleMute}
+          className="bg-blue-400 text-black px-4 py-1 rounded hover:bg-blue-500 flex items-center justify-center gap-2"
+        >
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          {muted ? 'Unmute' : 'Mute'}
         </button>
         {gameOver && (
           <button
