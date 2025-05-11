@@ -1,0 +1,211 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+const WORDS = ['react', 'typing', 'game', 'enemy', 'shoot', 'keyboard', 'level', 'score', 'speed'];
+
+function getRandomWord() {
+  return WORDS[Math.floor(Math.random() * WORDS.length)];
+}
+
+function generateEnemy(id, speedMultiplier) {
+  return {
+    id,
+    word: getRandomWord(),
+    typed: '',
+    x: Math.random() * 80 + 10,
+    y: 0,
+    speed: (Math.random() * 0.3 + 0.2) * speedMultiplier,
+  };
+}
+
+export default function TypingGame() {
+  const [enemies, setEnemies] = useState([]);
+  const [input, setInput] = useState('');
+  const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(() => parseInt(localStorage.getItem('highScore')) || 0);
+  const [gameOver, setGameOver] = useState(false);
+  const [level, setLevel] = useState(1);
+  const [speedMultiplier, setSpeedMultiplier] = useState(1);
+  const [targetId, setTargetId] = useState(null);
+  const [countdown, setCountdown] = useState(3);
+  const [paused, setPaused] = useState(false);
+  const [isDimmed, setIsDimmed] = useState(false);
+  const gameRef = useRef();
+  const idCounter = useRef(0);
+  const audioRef = useRef(null);
+  const destroySoundRef = useRef(null);
+  const pauseSoundRef = useRef(null);
+  const resumeSoundRef = useRef(null);
+
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
+  useEffect(() => {
+    if (countdown > 0 || paused) return;
+    const interval = setInterval(() => {
+      if (!gameOver) {
+        setEnemies((prev) => [...prev, generateEnemy(idCounter.current++, speedMultiplier)]);
+      }
+    }, 2000 / speedMultiplier);
+    return () => clearInterval(interval);
+  }, [gameOver, speedMultiplier, countdown, paused]);
+
+  useEffect(() => {
+    if (countdown > 0 || paused) return;
+    const gameLoop = setInterval(() => {
+      setEnemies((prev) =>
+        prev
+          .map((enemy) => ({ ...enemy, y: enemy.y + enemy.speed }))
+          .filter((enemy) => {
+            if (enemy.y >= 100) {
+              setGameOver(true);
+              return false;
+            }
+            return true;
+          })
+      );
+    }, 100);
+    return () => clearInterval(gameLoop);
+  }, [countdown, paused]);
+
+  useEffect(() => {
+    const matchedIndex = enemies.findIndex((enemy) => enemy.word.startsWith(input));
+    if (matchedIndex >= 0) {
+      setTargetId(enemies[matchedIndex].id);
+      if (enemies[matchedIndex].word === input) {
+        setScore((s) => s + 1);
+        setEnemies((prev) => prev.filter((_, i) => i !== matchedIndex));
+        setInput('');
+        setTargetId(null);
+        if (destroySoundRef.current) {
+          destroySoundRef.current.currentTime = 0;
+          destroySoundRef.current.play().catch(() => {});
+        }
+      }
+    } else {
+      setTargetId(null);
+    }
+  }, [input, enemies]);
+
+  useEffect(() => {
+    const newLevel = Math.floor(score / 5) + 1;
+    setLevel(newLevel);
+    setSpeedMultiplier(1 + (newLevel - 1) * 0.2);
+    if (score > highScore) {
+      setHighScore(score);
+      localStorage.setItem('highScore', score.toString());
+    }
+  }, [score]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = 0.5;
+      audioRef.current.loop = true;
+      audioRef.current.play().catch(() => {});
+    }
+  }, []);
+
+  const handleInput = (e) => {
+    if (!gameOver && !paused) setInput(e.target.value);
+  };
+
+  const restartGame = () => {
+    setEnemies([]);
+    setInput('');
+    setScore(0);
+    setLevel(1);
+    setSpeedMultiplier(1);
+    setGameOver(false);
+    setTargetId(null);
+    idCounter.current = 0;
+    setCountdown(3);
+    setPaused(false);
+    setIsDimmed(false);
+  };
+
+  const togglePause = () => {
+    setPaused((prev) => {
+      const newPaused = !prev;
+      setIsDimmed(newPaused);
+      const soundRef = newPaused ? pauseSoundRef : resumeSoundRef;
+      if (soundRef.current) {
+        soundRef.current.currentTime = 0;
+        soundRef.current.play().catch(() => {});
+      }
+      return newPaused;
+    });
+  };
+
+  return (
+    <div className={`min-h-screen text-white p-4 relative overflow-hidden transition-all duration-300 ${isDimmed ? 'bg-gray-800' : 'bg-gradient-to-b from-black via-gray-900 to-black'}`}>
+      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_d2952b2092.mp3?filename=chill-ambient-110849.mp3" />
+      <audio ref={destroySoundRef} src="https://cdn.pixabay.com/download/audio/2022/03/01/audio_b97f8b0f1a.mp3?filename=short-explosion-11776.mp3" />
+      <audio ref={pauseSoundRef} src="https://cdn.pixabay.com/download/audio/2022/10/25/audio_4e672de56e.mp3?filename=pause-102193.mp3" />
+      <audio ref={resumeSoundRef} src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_5e1d168f2e.mp3?filename=positive-notification-110913.mp3" />
+
+      <h1 className="text-4xl font-extrabold mb-4 text-center">React Typing Game</h1>
+      <p className="mb-2 text-center text-xl">Score: {score} | Level: {level} | High Score: {highScore}</p>
+
+      {countdown > 0 ? (
+        <div className="text-center text-6xl font-bold animate-bounce">{countdown}</div>
+      ) : (
+        <div className="flex justify-center mb-4">
+          <input
+            type="text"
+            value={input}
+            onChange={handleInput}
+            className="text-black p-2 rounded w-64 text-center"
+            autoFocus
+          />
+        </div>
+      )}
+
+      <div className="text-center mb-4">
+        <button
+          onClick={togglePause}
+          className="bg-yellow-400 text-black px-4 py-1 rounded mr-2 hover:bg-yellow-500"
+        >
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+        {gameOver && (
+          <button
+            onClick={restartGame}
+            className="bg-white text-black px-4 py-1 rounded hover:bg-gray-200"
+          >
+            Restart
+          </button>
+        )}
+      </div>
+
+      {gameOver && (
+        <div className="mt-4 text-center">
+          <h2 className="text-red-500 text-2xl">Game Over!</h2>
+        </div>
+      )}
+
+      <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+        {enemies.map((enemy) => (
+          <div
+            key={enemy.id}
+            style={{
+              position: 'absolute',
+              left: `${enemy.x}%`,
+              top: `${enemy.y}%`,
+              transition: 'top 0.1s',
+              transform: enemy.id === targetId ? 'scale(1.2)' : 'scale(1)',
+              zIndex: enemy.id === targetId ? 10 : 1,
+            }}
+            className={`text-xl font-mono drop-shadow-lg animate-pulse ${
+              enemy.id === targetId ? 'text-red-400 font-bold' : 'text-yellow-300'
+            }`}
+          >
+            {enemy.word}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
